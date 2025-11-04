@@ -89,6 +89,19 @@ fn beat_frequencies(
     beat_freqs
 }
 
+fn sample_signal(t: &[f64], frequencies: &[f64]) -> Vec<f64> {
+    // For each timestamp in t, sum sin(2π f t) for all frequencies and return a Vec
+    t.iter()
+        .map(|&t_val| {
+            let mut sum = 0.0;
+            for &f in frequencies {
+                sum += (2.0 * std::f64::consts::PI * f * t_val).sin();
+            }
+            sum
+        })
+        .collect()
+}
+
 impl App {
     /// Called once before the first frame.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
@@ -103,33 +116,33 @@ impl App {
             Default::default()
         }
     }
-}
 
-fn update_data(app: &mut App) {
-    let samples = 10000;
-    let duration = 100E-6;
-    let bandwidth = 1.6E9;
-    app.chirps = vec![40E-6];
-    app.t = (0..samples)
-        .map(|i| i as f64 * duration / samples as f64)
-        .collect();
-    // Calculate frequencies across the time vector
-    let saw_values = saw(&app.t, &app.chirps);
-    app.f = saw_values
-        .iter()
-        .map(|&s| s * bandwidth + app.carrier_frequency)
-        .collect();
+    pub fn update(&mut self) {
+        let samples = 10000;
+        let duration = 100E-6;
+        let bandwidth = 1.6E9;
+        self.chirps = vec![40E-6];
+        self.t = (0..samples)
+            .map(|i| i as f64 * duration / samples as f64)
+            .collect();
+        // Calculate frequencies across the time vector
+        let saw_values = saw(&self.t, &self.chirps);
+        self.f = saw_values
+            .iter()
+            .map(|&s| s * bandwidth + self.carrier_frequency)
+            .collect();
 
-    for obj in app.objects.iter_mut() {
-        obj.4 = beat_frequencies(
-            &app.t,
-            &app.f,
-            obj.0,
-            obj.1,
-            app.carrier_frequency,
-            bandwidth,
-            &app.chirps,
-        );
+        for obj in self.objects.iter_mut() {
+            obj.4 = beat_frequencies(
+                &self.t,
+                &self.f,
+                obj.0,
+                obj.1,
+                self.carrier_frequency,
+                bandwidth,
+                &self.chirps,
+            );
+        }
     }
 }
 
@@ -141,7 +154,7 @@ impl eframe::App for App {
 
     /// Called each time the UI needs repainting, which may be many times per second.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        update_data(self);
+        self.update();
         egui::CentralPanel::default().show(ctx, |ui| {
             // The central panel the region left after adding TopPanel's and SidePanel's
             ui.heading("FMCW Radar demo 0");
@@ -211,35 +224,34 @@ impl eframe::App for App {
                     // Create a linspace from 0.0 to 1E-6 with 1024 points
                     let start = 5E-6;
                     let duration = 1E-6;
+
+                    // Find the index in self.t that is closest to 'start'
+                    let idx = self
+                        .t
+                        .iter()
+                        .enumerate()
+                        .min_by(|(_, a), (_, b)| {
+                            (*a - start).abs().partial_cmp(&(*b - start).abs()).unwrap()
+                        })
+                        .map(|(i, _)| i)
+                        .unwrap_or(0);
+
+                    // Collect the beat frequencies at the found index for all enabled objects
+                    let mut frequencies: Vec<f64> = Vec::new();
+                    for obj in self.objects.iter().take(3) {
+                        if obj.3 && obj.4.len() > idx {
+                            frequencies.push(obj.4[idx]);
+                        }
+                    }
                     let t: Vec<f64> = (0..512)
                         .map(|i| start + i as f64 * duration / 511.0)
                         .collect();
-
-                    // Compute the sum of the three objects' beat frequency sines at a given t
-                    fn beat_sine_sum(
-                        objects: &[(f64, f64, egui::Color32, bool, Vec<f64>)],
-                        t_val: f64,
-                    ) -> f64 {
-                        let mut sum = 0.0;
-                        for obj in objects.iter().take(3) {
-                            if obj.3 && obj.4.len() > 40 {
-                                let bf = obj.4[40];
-                                sum += (2.0 * std::f64::consts::PI * bf * t_val).sin();
-                            }
-                        }
-                        sum
-                    }
-
-                    // Sum the sinus functions of all enabled objects' beat frequencies
-                    let summed_signal: Vec<f64> = t
-                        .iter()
-                        .map(|&t_val| beat_sine_sum(&self.objects, t_val))
-                        .collect();
+                    let high_res_signal = sample_signal(&t, &frequencies);
                     // Plot the summed signal
                     let line = egui_plot::Line::new(
                         "Summed Beat Sine",
                         egui_plot::PlotPoints::from_iter(
-                            t.iter().zip(summed_signal.iter()).map(|(&x, &y)| [x, y]),
+                            t.iter().zip(high_res_signal.iter()).map(|(&x, &y)| [x, y]),
                         ),
                     )
                     .color(egui::Color32::YELLOW)
@@ -252,15 +264,11 @@ impl eframe::App for App {
                     let t: Vec<f64> = (0..n)
                         .map(|i| start + i as f64 * duration / (n - 1) as f64)
                         .collect();
-                    // Sum the sinus functions of all enabled objects' beat frequencies
-                    let magnitude_sample: Vec<f64> = t
-                        .iter()
-                        .map(|&t_val| beat_sine_sum(&self.objects, t_val))
-                        .collect();
+                    let low_res_signal = sample_signal(&t, &frequencies);
                     // Convert t and magnitude_sample to points for plotting
                     let overlay_points: Vec<[f64; 2]> = t
                         .iter()
-                        .zip(magnitude_sample.iter())
+                        .zip(low_res_signal.iter())
                         .map(|(&tx, &my)| [tx, my])
                         .collect();
                     let points = egui_plot::Points::new("Overlay Samples", overlay_points)
