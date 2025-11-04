@@ -209,34 +209,64 @@ impl eframe::App for App {
                 .height(100.0)
                 .show(ui, |plot_ui| {
                     // Create a linspace from 0.0 to 1E-6 with 1024 points
-                    let t: Vec<f64> = (0..1024).map(|i| i as f64 * 1E-6 / 1023.0).collect();
-                    // Sum the sinus functions of all enabled objects' beat frequencies
-                    let mut summed_signal: Vec<f64> = vec![0.0; t.len()];
-                    for obj in self.objects.iter() {
-                        if !obj.3 {
-                            continue;
-                        }
-                        // Use the beat frequency at index 40 for all t
-                        if obj.4.len() > 40 {
-                            let bf = obj.4[40];
-                            for (i, &t_val) in t.iter().enumerate() {
-                                summed_signal[i] += (2.0 * std::f64::consts::PI * bf * t_val).sin();
+                    let start = 5E-6;
+                    let duration = 1E-6;
+                    let t: Vec<f64> = (0..512)
+                        .map(|i| start + i as f64 * duration / 511.0)
+                        .collect();
+
+                    // Compute the sum of the three objects' beat frequency sines at a given t
+                    fn beat_sine_sum(
+                        objects: &[(f64, f64, egui::Color32, bool, Vec<f64>)],
+                        t_val: f64,
+                    ) -> f64 {
+                        let mut sum = 0.0;
+                        for obj in objects.iter().take(3) {
+                            if obj.3 && obj.4.len() > 40 {
+                                let bf = obj.4[40];
+                                sum += (2.0 * std::f64::consts::PI * bf * t_val).sin();
                             }
                         }
+                        sum
                     }
+
+                    // Sum the sinus functions of all enabled objects' beat frequencies
+                    let summed_signal: Vec<f64> = t
+                        .iter()
+                        .map(|&t_val| beat_sine_sum(&self.objects, t_val))
+                        .collect();
                     // Plot the summed signal
                     let line = egui_plot::Line::new(
                         "Summed Beat Sine",
                         egui_plot::PlotPoints::from_iter(
-                            self.t
-                                .iter()
-                                .zip(summed_signal.iter())
-                                .map(|(&x, &y)| [x, y]),
+                            t.iter().zip(summed_signal.iter()).map(|(&x, &y)| [x, y]),
                         ),
                     )
                     .color(egui::Color32::YELLOW)
                     .name("Sum of sin(2π·beat_freq·t) for all objects");
                     plot_ui.line(line);
+
+                    // Overlay sampling points
+                    let sampling_rate = 100E6;
+                    let n = (duration * sampling_rate).round() as usize;
+                    let t: Vec<f64> = (0..n)
+                        .map(|i| start + i as f64 * duration / (n - 1) as f64)
+                        .collect();
+                    // Sum the sinus functions of all enabled objects' beat frequencies
+                    let magnitude_sample: Vec<f64> = t
+                        .iter()
+                        .map(|&t_val| beat_sine_sum(&self.objects, t_val))
+                        .collect();
+                    // Convert t and magnitude_sample to points for plotting
+                    let overlay_points: Vec<[f64; 2]> = t
+                        .iter()
+                        .zip(magnitude_sample.iter())
+                        .map(|(&tx, &my)| [tx, my])
+                        .collect();
+                    let points = egui_plot::Points::new("Overlay Samples", overlay_points)
+                        .color(egui::Color32::RED)
+                        .radius(4.0);
+                    plot_ui.points(points);
                 });
 
             ui.add(egui::github_link_file!(
