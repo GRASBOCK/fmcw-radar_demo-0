@@ -259,7 +259,7 @@ impl eframe::App for App {
                     plot_ui.line(line);
 
                     // Overlay sampling points
-                    let sampling_rate = 100E6;
+                    let sampling_rate = 50E6;
                     let n = (duration * sampling_rate).round() as usize;
                     let t: Vec<f64> = (0..n)
                         .map(|i| start + i as f64 * duration / (n - 1) as f64)
@@ -275,6 +275,78 @@ impl eframe::App for App {
                         .color(egui::Color32::RED)
                         .radius(4.0);
                     plot_ui.points(points);
+                });
+
+            egui_plot::Plot::new("fft_plot")
+                .height(120.0)
+                .show(ui, |plot_ui| {
+                    // FFT of the sampled signal (from my_plot3)
+                    // Use the same sampled signal as in my_plot3 overlay
+                    let start = 5E-6;
+                    let duration = 40E-6;
+                    let sampling_rate = 50E6f64;
+                    let n = (duration * sampling_rate).round() as usize;
+                    let t: Vec<f64> = (0..n)
+                        .map(|i| start + i as f64 * duration / (n - 1) as f64)
+                        .collect();
+
+                    // Collect the beat frequencies at the found index for all enabled objects
+                    let idx = self
+                        .t
+                        .iter()
+                        .enumerate()
+                        .min_by(|(_, a), (_, b)| {
+                            (*a - start).abs().partial_cmp(&(*b - start).abs()).unwrap()
+                        })
+                        .map(|(i, _)| i)
+                        .unwrap_or(0);
+
+                    let mut frequencies: Vec<f64> = Vec::new();
+                    for obj in self.objects.iter().take(3) {
+                        if obj.3 && obj.4.len() > idx {
+                            frequencies.push(obj.4[idx]);
+                        }
+                    }
+                    let signal = sample_signal(&t, &frequencies);
+
+                    // Compute FFT using rustfft
+                    // Import rustfft types
+                    use rustfft::{FftPlanner, num_complex::Complex};
+                    let mut planner = FftPlanner::<f64>::new();
+                    let fft = planner.plan_fft_forward(n);
+
+                    // Prepare input: convert real signal to complex
+                    let mut buffer: Vec<Complex<f64>> =
+                        signal.iter().map(|&x| Complex { re: x, im: 0.0 }).collect();
+                    fft.process(&mut buffer);
+
+                    // Compute magnitude spectrum (normalize)
+                    let norm = n as f64;
+                    let spectrum: Vec<(f64, f64)> = buffer
+                        .iter()
+                        .take(n / 2)
+                        .enumerate()
+                        .map(|(i, c)| {
+                            let freq = i as f64 * sampling_rate / n as f64;
+                            let mag = (c.norm() / norm) * 2.0; // scale for single-sided spectrum
+                            (freq, mag)
+                        })
+                        .collect();
+
+                    // Plot the FFT magnitude
+                    let line = egui_plot::Line::new(
+                        "FFT Magnitude",
+                        egui_plot::PlotPoints::from_iter(
+                            spectrum.iter().map(|&(f, mag)| [f * 1e-6, mag]), // MHz
+                        ),
+                    )
+                    .color(egui::Color32::LIGHT_GREEN)
+                    .name("FFT |Magnitude| (MHz)");
+                    plot_ui.line(line);
+
+                    //plot_ui.set_x_axis_formatter(|x, _| format!("{:.1}", x));
+                    //plot_ui.set_x_axis_label("Frequency (MHz)");
+                    //plot_ui.set_y_axis_label("Magnitude");
                 });
 
             ui.add(egui::github_link_file!(
