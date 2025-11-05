@@ -185,7 +185,23 @@ impl App {
         // FFT of the sampled signal (from my_plot3)
         // Use the same sampled signal as in my_plot3 overlay
         // Create FFT spectra for multiple different start times
-        let start_times = [38E-6, 58E-6];
+        // For each chirp, compute the start time as the sum of previous chirp durations plus 98% of the current chirp duration
+        let mut start_times = Vec::new();
+        // sum of chirps (except the last one)
+        for (i, &chirp) in self.chirps.iter().enumerate() {
+            let sum = {
+                if i > 0 {
+                    self.chirps.iter().take(i).sum()
+                } else {
+                    0.0
+                }
+            };
+            dbg!(&sum);
+            let sum = sum + chirp * 0.98;
+            start_times.push(sum);
+        }
+        dbg!(&start_times);
+
         let duration = 40E-6;
         let sampling_rate = 50E6f64;
         let n = (duration * sampling_rate).round() as usize;
