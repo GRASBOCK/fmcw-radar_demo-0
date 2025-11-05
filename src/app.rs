@@ -7,6 +7,10 @@ pub struct App {
     objects: Vec<(f64, f64, egui::Color32, bool, Vec<f64>)>,
 
     carrier_frequency: f64,
+    bandwidth: f64,
+    sampling_frequency: f64,
+    sampling_duration: f64,
+    plot_lines: bool,
     t: Vec<f64>,
     chirps: Vec<f64>,
     ffts: Vec<Vec<(f64, f64)>>,
@@ -20,13 +24,17 @@ impl Default for App {
     fn default() -> Self {
         Self {
             carrier_frequency: 77E9,
+            bandwidth: 1.6E9,
+            sampling_frequency: 50E6f64,
+            sampling_duration: 40E-6,
             objects: vec![
                 (10.0, 0.0, egui::Color32::GREEN, true, vec![]),
                 (30.0, 20.0, egui::Color32::BLUE, false, vec![]),
                 (40.0, -10.0, egui::Color32::RED, false, vec![]),
             ],
+            plot_lines: true,
             t: vec![],
-            chirps: vec![],
+            chirps: vec![40e-6, 20e-6, 60e-6],
             f: vec![],
             ffts: vec![],
             fft_peaks: vec![],
@@ -203,10 +211,8 @@ impl App {
     }
 
     pub fn update(&mut self) {
-        let samples = 10000;
-        let duration = 100E-6;
-        let bandwidth = 1.6E9;
-        self.chirps = vec![40E-6, 20E-6];
+        let samples = 1000;
+        let duration: f64 = self.chirps.iter().sum::<f64>() * 3.0;
         self.t = (0..samples)
             .map(|i| i as f64 * duration / samples as f64)
             .collect();
@@ -214,7 +220,7 @@ impl App {
         let saw_values = saw(&self.t, &self.chirps);
         self.f = saw_values
             .iter()
-            .map(|&s| s * bandwidth + self.carrier_frequency)
+            .map(|&s| s * self.bandwidth + self.carrier_frequency)
             .collect();
 
         for obj in self.objects.iter_mut() {
@@ -224,7 +230,7 @@ impl App {
                 obj.0,
                 obj.1,
                 self.carrier_frequency,
-                bandwidth,
+                self.bandwidth,
                 &self.chirps,
             );
         }
@@ -247,15 +253,13 @@ impl App {
             start_times.push(sum);
         }
 
-        let duration = 40E-6;
-        let sampling_rate = 50E6f64;
-        let n = (duration * sampling_rate).round() as usize;
+        let n = (self.sampling_duration * self.sampling_frequency).round() as usize;
 
         self.ffts = start_times
             .iter()
             .map(|&start| {
                 let t: Vec<f64> = (0..n)
-                    .map(|i| start + i as f64 * duration / (n - 1) as f64)
+                    .map(|i| start + i as f64 * self.sampling_duration / (n - 1) as f64)
                     .collect();
 
                 // Collect the beat frequencies at the found index for all enabled objects
@@ -269,7 +273,7 @@ impl App {
                 }
                 let signal = sample_signal(&t, &frequencies);
 
-                fftspectrum(&signal, sampling_rate)
+                fftspectrum(&signal, self.sampling_frequency)
             })
             .collect();
         // Find peaks in each FFT using multiple_peak_finding
@@ -287,8 +291,8 @@ impl App {
             })
             .collect();
 
-        let v_min = -30.0;
-        let v_max = 30.0;
+        let v_min = -50.0;
+        let v_max = 50.0;
 
         let mut lines = vec![];
         for (i, peaks) in self.fft_peaks.iter().enumerate() {
@@ -297,9 +301,9 @@ impl App {
             let f0 = self.f[idx];
 
             for &(bf, _) in peaks.iter() {
-                let r0 = -(doppler_shift(f0, v_min) - bf) * self.chirps[i] / bandwidth / 2.0
+                let r0 = -(doppler_shift(f0, v_min) - bf) * self.chirps[i] / self.bandwidth / 2.0
                     * SPEED_OF_LIGHT;
-                let r1 = -(doppler_shift(f0, v_max) - bf) * self.chirps[i] / bandwidth / 2.0
+                let r1 = -(doppler_shift(f0, v_max) - bf) * self.chirps[i] / self.bandwidth / 2.0
                     * SPEED_OF_LIGHT;
                 lines.push(((r0, -v_min), (r1, -v_max)));
             }
@@ -321,23 +325,85 @@ impl eframe::App for App {
             // The central panel the region left after adding TopPanel's and SidePanel's
             ui.heading("FMCW Radar demo 0");
 
-            for (i, obj) in self.objects.iter_mut().enumerate() {
-                ui.horizontal(|ui| {
-                    ui.label(format!("Object {}", i + 1));
-                    ui.add(egui::Checkbox::new(&mut obj.3, ""));
+            egui::SidePanel::left("left_panel").show_inside(ui, |ui| {
+                ui.heading("Objects");
+                for (i, obj) in self.objects.iter_mut().enumerate() {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(format!("Object {}", i + 1))
+                                .color(obj.2)
+                                .background_color(egui::Color32::BLACK),
+                        );
+                        ui.add(egui::Checkbox::new(&mut obj.3, ""));
+                    });
                     ui.add(egui::Slider::new(&mut obj.0, 0.0..=100.0).text("Range"));
-                    ui.add(egui::Slider::new(&mut obj.1, -20.0..=20.0).text("Velocity"));
-                });
-            }
-
-            ui.separator();
-
+                    ui.add(egui::Slider::new(&mut obj.1, -50.0..=50.0).text("Velocity"));
+                }
+                ui.separator();
+                ui.heading("Radar Parameters");
+                ui.add(
+                    egui::Slider::new(&mut self.carrier_frequency, 10e9..=100e9)
+                        .text("Carrier Frequency (Hz)")
+                        .logarithmic(true)
+                        .step_by(1e6),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.bandwidth, 1e9..=4e9)
+                        .text("Bandwidth (Hz)")
+                        .logarithmic(true)
+                        .step_by(1e8),
+                );
+                for (i, chirp) in self.chirps.iter_mut().enumerate() {
+                    ui.add(
+                        egui::Slider::new(chirp, 20e-6..=100e-6)
+                            .text(format!("Chirp {} Duration (s)", i + 1))
+                            .logarithmic(true)
+                            .step_by(1e-6),
+                    );
+                }
+                ui.add(
+                    egui::Slider::new(&mut self.sampling_frequency, 10e6..=100e6)
+                        .text("Sampling Rate (Hz)")
+                        .logarithmic(true)
+                        .step_by(1e6),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.sampling_duration, 1e-6..=100e-6)
+                        .text("Sampling Duration (s)")
+                        .logarithmic(true)
+                        .step_by(1e-6),
+                );
+                ui.separator();
+                ui.label(format!(
+                    "Sample count: {} (sampling_duration × sampling_frequency)",
+                    (self.sampling_duration * self.sampling_frequency).round() as usize
+                ));
+                ui.separator();
+            });
+            ui.add(egui::Checkbox::new(&mut self.plot_lines, "Plot Lines"));
             egui_plot::Plot::new("my_plot")
-                .height(100.0)
+                .height(500.0)
                 .auto_bounds(false)
                 .default_x_bounds(0.0, 100.0)
-                .default_y_bounds(-20.0, 20.0)
+                .default_y_bounds(-60.0, 60.0)
                 .show(ui, |plot_ui| {
+                    if self.plot_lines {
+                        for (i, line) in self.lines.iter().enumerate() {
+                            let color = egui::Color32::from_rgb(200, 200, 200); // light gray for lines
+                            let plot_line = egui_plot::Line::new(
+                                format!("line_{i}"),
+                                egui_plot::PlotPoints::from_iter([
+                                    [line.0.0, line.0.1],
+                                    [line.1.0, line.1.1],
+                                ]),
+                            )
+                            .color(color)
+                            .width(2.0)
+                            .name(format!("Line {i}"));
+                            plot_ui.line(plot_line);
+                        }
+                    }
+
                     for (i, obj) in self.objects.iter().enumerate() {
                         if !obj.3 {
                             continue;
@@ -413,8 +479,7 @@ impl eframe::App for App {
                     plot_ui.line(line);
 
                     // Overlay sampling points
-                    let sampling_rate = 50E6;
-                    let n = (duration * sampling_rate).round() as usize;
+                    let n = (duration * self.sampling_frequency).round() as usize;
                     let t: Vec<f64> = (0..n)
                         .map(|i| start + i as f64 * duration / (n - 1) as f64)
                         .collect();
@@ -497,36 +562,6 @@ impl eframe::App for App {
                     //plot_ui.set_x_axis_formatter(|x, _| format!("{:.1}", x));
                     //plot_ui.set_x_axis_label("Frequency (MHz)");
                     //plot_ui.set_y_axis_label("Magnitude");
-                });
-
-            egui_plot::Plot::new("my_plot_6")
-                .height(100.0)
-                .show(ui, |plot_ui| {
-                    for (i, obj) in self.objects.iter().enumerate() {
-                        if !obj.3 {
-                            continue;
-                        }
-                        // Draw a sphere for each object as a circle on the plot
-                        let sphere =
-                            egui_plot::Points::new(format!("sphere_{i}"), vec![[obj.0, obj.1]])
-                                .radius(3.0)
-                                .color(obj.2);
-                        plot_ui.points(sphere);
-                    }
-                    for (i, line) in self.lines.iter().enumerate() {
-                        let color = egui::Color32::from_rgb(200, 200, 200); // light gray for lines
-                        let plot_line = egui_plot::Line::new(
-                            format!("line_{i}"),
-                            egui_plot::PlotPoints::from_iter([
-                                [line.0.0, line.0.1],
-                                [line.1.0, line.1.1],
-                            ]),
-                        )
-                        .color(color)
-                        .width(2.0)
-                        .name(format!("Line {i}"));
-                        plot_ui.line(plot_line);
-                    }
                 });
 
             ui.add(egui::github_link_file!(
