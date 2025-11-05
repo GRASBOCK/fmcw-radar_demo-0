@@ -9,8 +9,10 @@ pub struct App {
     carrier_frequency: f64,
     t: Vec<f64>,
     chirps: Vec<f64>,
-    ffts: Vec<Vec<f64>>,
+    ffts: Vec<Vec<(f64, f64)>>,
+    fft_peaks: Vec<Vec<(f64, f64)>>,
     f: Vec<f64>,
+    bf: Vec<f64>,
 }
 
 impl Default for App {
@@ -26,6 +28,8 @@ impl Default for App {
             chirps: vec![],
             f: vec![],
             ffts: vec![],
+            fft_peaks: vec![],
+            bf: vec![],
         }
     }
 }
@@ -140,6 +144,48 @@ fn idx_at_t(v: &[f64], t: f64) -> usize {
         .unwrap_or(0)
 }
 
+// Find multiple peaks in a signal above the baseline (average)
+// Returns a Vec<usize> of indices of the peaks
+fn multiple_peak_finding(signal: &[f64]) -> Vec<usize> {
+    let mut peak_indices = Vec::new();
+    let mut peak_index: Option<usize> = None;
+    let mut peak_value: Option<f64> = None;
+    let baseline = if signal.is_empty() {
+        0.0
+    } else {
+        signal.iter().sum::<f64>() / signal.len() as f64
+    };
+
+    for (index, &value) in signal.iter().enumerate() {
+        let baseline = if signal.is_empty() {
+            0.0
+        } else {
+            // Calculate average in surrounding (next 20 indices)
+            let start = index;
+            let end = (index + 2).min(signal.len());
+            if start < end {
+                signal[start..end].iter().sum::<f64>() / (end - start) as f64
+            } else {
+                0.0
+            }
+        };
+        if value > baseline {
+            if peak_value.is_none() || value > peak_value.unwrap() {
+                peak_index = Some(index);
+                peak_value = Some(value);
+            }
+        } else if value < baseline && peak_index.is_some() {
+            peak_indices.push(peak_index.unwrap());
+            peak_index = None;
+            peak_value = None;
+        }
+    }
+    if peak_index.is_some() {
+        peak_indices.push(peak_index.unwrap());
+    }
+    peak_indices
+}
+
 impl App {
     /// Called once before the first frame.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
@@ -196,11 +242,9 @@ impl App {
                     0.0
                 }
             };
-            dbg!(&sum);
             let sum = sum + chirp * 0.98;
             start_times.push(sum);
         }
-        dbg!(&start_times);
 
         let duration = 40E-6;
         let sampling_rate = 50E6f64;
@@ -224,9 +268,21 @@ impl App {
                 }
                 let signal = sample_signal(&t, &frequencies);
 
-                // Only keep the magnitude part of the spectrum for plotting
-                let spectrum = fftspectrum(&signal, sampling_rate);
-                spectrum.iter().map(|&(_f, mag)| mag).collect::<Vec<f64>>()
+                fftspectrum(&signal, sampling_rate)
+            })
+            .collect();
+        // Find peaks in each FFT using multiple_peak_finding
+        // Find peaks in each FFT and return their actual frequencies (in Hz)
+        self.fft_peaks = self
+            .ffts
+            .iter()
+            .map(|fft| {
+                let mags: Vec<f64> = fft.iter().map(|&(_, mag)| mag).collect();
+                let peak_indices = multiple_peak_finding(&mags);
+                peak_indices
+                    .into_iter()
+                    .map(|idx| (fft[idx].0, fft[idx].1))
+                    .collect::<Vec<(f64, f64)>>()
             })
             .collect();
     }
@@ -372,31 +428,19 @@ impl eframe::App for App {
                     ];
                     for (i, fft) in self.ffts.iter().enumerate() {
                         let line = egui_plot::Line::new(
-                            format!("FFT_{i}"),
-                            egui_plot::PlotPoints::from_iter(fft.iter().enumerate().map(
-                                |(j, &mag)| {
-                                    // Frequency axis: up to Nyquist, evenly spaced
-                                    let n = fft.len();
-                                    let freq = j as f64 * 50.0 / n as f64; // MHz, since sampling_rate=50E6
-                                    [freq, mag]
-                                },
-                            )),
+                            format!("FFT Chrip {i}"),
+                            egui_plot::PlotPoints::from_iter(
+                                fft.iter().map(|(freq, mag)| [*freq, *mag]),
+                            ),
                         )
                         .color(colors[i % colors.len()])
-                        .name(format!("FFT {i}"));
+                        .name(format!("FFT Chrip {i}"));
                         plot_ui.line(line);
                     }
 
                     // For compatibility with the code below, set spectrum to the first fft (or empty if none)
                     let spectrum: Vec<(f64, f64)> = if let Some(fft) = self.ffts.get(0) {
-                        fft.iter()
-                            .enumerate()
-                            .map(|(j, &mag)| {
-                                let n = fft.len();
-                                let freq = j as f64 * 50.0 / n as f64; // MHz
-                                (freq, mag)
-                            })
-                            .collect()
+                        fft.iter().map(|(freq, mag)| (*freq, *mag)).collect()
                     } else {
                         Vec::new()
                     };
@@ -410,6 +454,25 @@ impl eframe::App for App {
                     .color(egui::Color32::LIGHT_GREEN)
                     .name("FFT |Magnitude| (MHz)");
                     plot_ui.line(line);
+
+                    for (i, peaks) in self.fft_peaks.iter().enumerate() {
+                        let peak_points: Vec<[f64; 2]> = peaks
+                            .iter()
+                            .map(|(freq, mag)| [*freq, *mag]) // MHz
+                            .collect();
+                        let points =
+                            egui_plot::Points::new(format!("FFT Peaks {i}"), peak_points.clone())
+                                .color(colors[i % colors.len()])
+                                .radius(3.0)
+                                .name(format!("FFT Peaks {i}"));
+                        plot_ui.points(points);
+                        let points = egui_plot::Points::new(format!("FFT Peaks {i}"), peak_points)
+                            .color(colors[i % colors.len()])
+                            .radius(1.0)
+                            .color(egui::Color32::BLACK)
+                            .name(format!("FFT Peaks {i}"));
+                        plot_ui.points(points);
+                    }
 
                     //plot_ui.set_x_axis_formatter(|x, _| format!("{:.1}", x));
                     //plot_ui.set_x_axis_label("Frequency (MHz)");
