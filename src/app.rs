@@ -150,11 +150,6 @@ fn multiple_peak_finding(signal: &[f64]) -> Vec<usize> {
     let mut peak_indices = Vec::new();
     let mut peak_index: Option<usize> = None;
     let mut peak_value: Option<f64> = None;
-    let baseline = if signal.is_empty() {
-        0.0
-    } else {
-        signal.iter().sum::<f64>() / signal.len() as f64
-    };
 
     for (index, &value) in signal.iter().enumerate() {
         let baseline = if signal.is_empty() {
