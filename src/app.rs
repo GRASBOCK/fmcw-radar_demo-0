@@ -102,6 +102,33 @@ fn sample_signal(t: &[f64], frequencies: &[f64]) -> Vec<f64> {
         .collect()
 }
 
+fn spectrum(signal: &[f64], sampling_rate: f64) -> Vec<(f64, f64)> {
+    let n = signal.len();
+    // Compute FFT using rustfft
+    // Import rustfft types
+    use rustfft::{FftPlanner, num_complex::Complex};
+    let mut planner = FftPlanner::<f64>::new();
+    let fft = planner.plan_fft_forward(n);
+
+    // Prepare input: convert real signal to complex
+    let mut buffer: Vec<Complex<f64>> =
+        signal.iter().map(|&x| Complex { re: x, im: 0.0 }).collect();
+    fft.process(&mut buffer);
+
+    // Compute magnitude spectrum (normalize)
+    let norm = n as f64;
+    buffer
+        .iter()
+        .take(n / 2)
+        .enumerate()
+        .map(|(i, c)| {
+            let freq = i as f64 * sampling_rate / n as f64;
+            let mag = (c.norm() / norm) * 2.0; // scale for single-sided spectrum
+            (freq, mag)
+        })
+        .collect()
+}
+
 impl App {
     /// Called once before the first frame.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
@@ -309,35 +336,12 @@ impl eframe::App for App {
                     }
                     let signal = sample_signal(&t, &frequencies);
 
-                    // Compute FFT using rustfft
-                    // Import rustfft types
-                    use rustfft::{FftPlanner, num_complex::Complex};
-                    let mut planner = FftPlanner::<f64>::new();
-                    let fft = planner.plan_fft_forward(n);
-
-                    // Prepare input: convert real signal to complex
-                    let mut buffer: Vec<Complex<f64>> =
-                        signal.iter().map(|&x| Complex { re: x, im: 0.0 }).collect();
-                    fft.process(&mut buffer);
-
-                    // Compute magnitude spectrum (normalize)
-                    let norm = n as f64;
-                    let spectrum: Vec<(f64, f64)> = buffer
-                        .iter()
-                        .take(n / 2)
-                        .enumerate()
-                        .map(|(i, c)| {
-                            let freq = i as f64 * sampling_rate / n as f64;
-                            let mag = (c.norm() / norm) * 2.0; // scale for single-sided spectrum
-                            (freq, mag)
-                        })
-                        .collect();
-
+                    let spec = spectrum(&signal, sampling_rate);
                     // Plot the FFT magnitude
                     let line = egui_plot::Line::new(
                         "FFT Magnitude",
                         egui_plot::PlotPoints::from_iter(
-                            spectrum.iter().map(|&(f, mag)| [f * 1e-6, mag]), // MHz
+                            spec.iter().map(|&(f, mag)| [f * 1e-6, mag]), // MHz
                         ),
                     )
                     .color(egui::Color32::LIGHT_GREEN)
