@@ -13,6 +13,7 @@ pub struct App {
     fft_peaks: Vec<Vec<(f64, f64)>>,
     f: Vec<f64>,
     bf: Vec<f64>,
+    lines: Vec<((f64, f64), (f64, f64))>,
 }
 
 impl Default for App {
@@ -30,6 +31,7 @@ impl Default for App {
             ffts: vec![],
             fft_peaks: vec![],
             bf: vec![],
+            lines: vec![],
         }
     }
 }
@@ -61,6 +63,12 @@ fn saw(t_: &[f64], tc: &[f64]) -> Vec<f64> {
         .collect()
 }
 
+fn doppler_shift(frequency: f64, velocity: f64) -> f64 {
+    // Calculate the Doppler shift for a given frequency and velocity
+    // Positive velocity means receding (redshift), negative means approaching (blueshift)
+    frequency * ((SPEED_OF_LIGHT - velocity) / (SPEED_OF_LIGHT + velocity) - 1.0)
+}
+
 fn beat_frequencies(
     t: &[f64],
     f: &[f64],
@@ -85,10 +93,8 @@ fn beat_frequencies(
     // Calculate beat frequency at each time sample
     let mut beat_freqs = vec![0.0; t.len()];
     for i in 0..t.len() {
-        let doppler_shift =
-            f[i] * ((SPEED_OF_LIGHT - velocity) / (SPEED_OF_LIGHT + velocity) - 1.0);
         let range_shift = range_frequencies[i] - f[i];
-        beat_freqs[i] = doppler_shift + range_shift;
+        beat_freqs[i] = doppler_shift(f[i], velocity) + range_shift;
     }
 
     // Return both the time vector, frequencies sent and the beat frequencies
@@ -280,6 +286,25 @@ impl App {
                     .collect::<Vec<(f64, f64)>>()
             })
             .collect();
+
+        let v_min = -30.0;
+        let v_max = 30.0;
+
+        let mut lines = vec![];
+        for (i, peaks) in self.fft_peaks.iter().enumerate() {
+            // fetch the carry frequency at sample time
+            let idx = idx_at_t(&self.t, start_times[i]);
+            let f0 = self.f[idx];
+
+            for &(bf, _) in peaks.iter() {
+                let r0 = -(doppler_shift(f0, v_min) - bf) * self.chirps[i] / bandwidth / 2.0
+                    * SPEED_OF_LIGHT;
+                let r1 = -(doppler_shift(f0, v_max) - bf) * self.chirps[i] / bandwidth / 2.0
+                    * SPEED_OF_LIGHT;
+                lines.push(((r0, -v_min), (r1, -v_max)));
+            }
+        }
+        self.lines = lines;
     }
 }
 
@@ -472,6 +497,36 @@ impl eframe::App for App {
                     //plot_ui.set_x_axis_formatter(|x, _| format!("{:.1}", x));
                     //plot_ui.set_x_axis_label("Frequency (MHz)");
                     //plot_ui.set_y_axis_label("Magnitude");
+                });
+
+            egui_plot::Plot::new("my_plot_6")
+                .height(100.0)
+                .show(ui, |plot_ui| {
+                    for (i, obj) in self.objects.iter().enumerate() {
+                        if !obj.3 {
+                            continue;
+                        }
+                        // Draw a sphere for each object as a circle on the plot
+                        let sphere =
+                            egui_plot::Points::new(format!("sphere_{i}"), vec![[obj.0, obj.1]])
+                                .radius(3.0)
+                                .color(obj.2);
+                        plot_ui.points(sphere);
+                    }
+                    for (i, line) in self.lines.iter().enumerate() {
+                        let color = egui::Color32::from_rgb(200, 200, 200); // light gray for lines
+                        let plot_line = egui_plot::Line::new(
+                            format!("line_{i}"),
+                            egui_plot::PlotPoints::from_iter([
+                                [line.0.0, line.0.1],
+                                [line.1.0, line.1.1],
+                            ]),
+                        )
+                        .color(color)
+                        .width(2.0)
+                        .name(format!("Line {i}"));
+                        plot_ui.line(plot_line);
+                    }
                 });
 
             ui.add(egui::github_link_file!(
