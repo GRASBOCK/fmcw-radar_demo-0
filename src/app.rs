@@ -56,7 +56,7 @@ fn saw(t_: &[f64], tc: &[f64]) -> Vec<f64> {
             let t_wrapped = t % total_duration;
             let mut total_period = 0.0;
             let mut current_period = period[0];
-            for &p in period.iter() {
+            for &p in period {
                 if t_wrapped < total_period + p {
                     current_period = p;
                     break;
@@ -92,7 +92,7 @@ fn beat_frequencies(
         .iter()
         .map(|ti| ti - timeshift_due_to_range)
         .collect::<Vec<f64>>();
-    let saw_values_at_range = saw(&time_at_range, chirps);
+    let saw_values_at_range = saw(time_at_range, chirps);
     let range_frequencies: Vec<f64> = saw_values_at_range
         .iter()
         .map(|&s| s * bandwidth + carrier_frequency)
@@ -223,7 +223,7 @@ impl App {
             .map(|&s| s * self.bandwidth + self.carrier_frequency)
             .collect();
 
-        for obj in self.objects.iter_mut() {
+        for obj in &mut self.objects {
             obj.4 = beat_frequencies(
                 &self.t,
                 &self.f,
@@ -300,7 +300,7 @@ impl App {
             let idx = idx_at_t(&self.t, start_times[i]);
             let f0 = self.f[idx];
 
-            for &(bf, _) in peaks.iter() {
+            for &(bf, _) in peaks {
                 let r0 = -(doppler_shift(f0, v_min) - bf) * self.chirps[i] / self.bandwidth / 2.0
                     * SPEED_OF_LIGHT;
                 let r1 = -(doppler_shift(f0, v_max) - bf) * self.chirps[i] / self.bandwidth / 2.0
@@ -524,7 +524,7 @@ impl eframe::App for App {
                     }
 
                     // For compatibility with the code below, set spectrum to the first fft (or empty if none)
-                    let spectrum: Vec<(f64, f64)> = if let Some(fft) = self.ffts.get(0) {
+                    let spectrum: Vec<(f64, f64)> = if let Some(fft) = self.ffts.first() {
                         fft.iter().map(|(freq, mag)| (*freq, *mag)).collect()
                     } else {
                         Vec::new()
@@ -545,14 +545,15 @@ impl eframe::App for App {
                             .iter()
                             .map(|(freq, mag)| [*freq, *mag]) // MHz
                             .collect();
+                        let color = colors.get(i % colors.len()).expect("Color not found");
                         let points =
                             egui_plot::Points::new(format!("FFT Peaks {i}"), peak_points.clone())
-                                .color(colors[i % colors.len()])
+                                .color(*color)
                                 .radius(3.0)
                                 .name(format!("FFT Peaks {i}"));
                         plot_ui.points(points);
                         let points = egui_plot::Points::new(format!("FFT Peaks {i}"), peak_points)
-                            .color(colors[i % colors.len()])
+                            .color(*color)
                             .radius(1.0)
                             .color(egui::Color32::BLACK)
                             .name(format!("FFT Peaks {i}"));
