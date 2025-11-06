@@ -348,10 +348,10 @@ impl eframe::App for App {
                         .step_by(1e6),
                 );
                 ui.add(
-                    egui::Slider::new(&mut self.bandwidth, 1e9..=4e9)
+                    egui::Slider::new(&mut self.bandwidth, 0.05e9..=4e9)
                         .text("Bandwidth (Hz)")
                         .logarithmic(true)
-                        .step_by(1e8),
+                        .step_by(0.05e9),
                 );
                 for (i, chirp) in self.chirps.iter_mut().enumerate() {
                     ui.add(
@@ -368,7 +368,7 @@ impl eframe::App for App {
                         .step_by(1e6),
                 );
                 ui.add(
-                    egui::Slider::new(&mut self.sampling_duration, 1e-6..=100e-6)
+                    egui::Slider::new(&mut self.sampling_duration, 1e-6..=1e-3)
                         .text("Sampling Duration (s)")
                         .logarithmic(true)
                         .step_by(1e-6),
