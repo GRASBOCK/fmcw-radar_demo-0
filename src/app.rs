@@ -355,7 +355,7 @@ impl eframe::App for App {
                 );
                 for (i, chirp) in self.chirps.iter_mut().enumerate() {
                     ui.add(
-                        egui::Slider::new(chirp, 20e-6..=100e-6)
+                        egui::Slider::new(chirp, 1e-6..=100e-3)
                             .text(format!("Chirp {} Duration (s)", i + 1))
                             .logarithmic(true)
                             .step_by(1e-6),
