@@ -422,9 +422,11 @@ impl eframe::App for App {
                 .show(ui, |plot_ui| {
                     let line = egui_plot::Line::new(
                         "f",
-                        egui_plot::PlotPoints::from_iter(
-                            self.t.iter().zip(self.f.iter()).map(|(&x, &y)| [x, y]),
-                        ),
+                        self.t
+                            .iter()
+                            .zip(self.f.iter())
+                            .map(|(&x, &y)| [x, y])
+                            .collect::<egui_plot::PlotPoints<'_>>(),
                     )
                     .color(egui::Color32::LIGHT_BLUE)
                     .name("Carrier Frequency");
@@ -435,10 +437,9 @@ impl eframe::App for App {
                         }
                         let line = egui_plot::Line::new(
                             format!("bf_{i}"),
-                            egui_plot::PlotPoints::from_iter(
-                                izip!(self.t.iter(), obj.4.iter(), self.f.iter())
-                                    .map(|(&x, &y, &f)| [x, y + f]),
-                            ),
+                            izip!(self.t.iter(), obj.4.iter(), self.f.iter())
+                                .map(|(&x, &y, &f)| [x, y + f])
+                                .collect::<egui_plot::PlotPoints<'_>>(),
                         )
                         .color(obj.2)
                         .name(format!("Beat Frequency of Object {i}"));
@@ -460,7 +461,8 @@ impl eframe::App for App {
                     let mut frequencies: Vec<f64> = Vec::new();
                     for obj in self.objects.iter().take(3) {
                         if obj.3 && obj.4.len() > idx {
-                            frequencies.push(obj.4[idx]);
+                            let f = obj.4.get(idx).expect("Frequency not at index");
+                            frequencies.push(*f);
                         }
                     }
                     let t: Vec<f64> = (0..512)
@@ -470,9 +472,10 @@ impl eframe::App for App {
                     // Plot the summed signal
                     let line = egui_plot::Line::new(
                         "Summed Beat Sine",
-                        egui_plot::PlotPoints::from_iter(
-                            t.iter().zip(high_res_signal.iter()).map(|(&x, &y)| [x, y]),
-                        ),
+                        t.iter()
+                            .zip(high_res_signal.iter())
+                            .map(|(&x, &y)| [x, y])
+                            .collect::<egui_plot::PlotPoints<'_>>(),
                     )
                     .color(egui::Color32::YELLOW)
                     .name("Sum of sin(2π·beat_freq·t) for all objects");
@@ -512,13 +515,14 @@ impl eframe::App for App {
                         egui::Color32::BLUE,
                     ];
                     for (i, fft) in self.ffts.iter().enumerate() {
+                        let color = colors.get(i % colors.len()).expect("Color not found");
                         let line = egui_plot::Line::new(
                             format!("FFT Chrip {i}"),
-                            egui_plot::PlotPoints::from_iter(
-                                fft.iter().map(|(freq, mag)| [*freq, *mag]),
-                            ),
+                            fft.iter()
+                                .map(|(freq, mag)| [*freq, *mag])
+                                .collect::<egui_plot::PlotPoints<'_>>(),
                         )
-                        .color(colors[i % colors.len()])
+                        .color(*color)
                         .name(format!("FFT Chrip {i}"));
                         plot_ui.line(line);
                     }
@@ -532,9 +536,10 @@ impl eframe::App for App {
                     // Plot the FFT magnitude
                     let line = egui_plot::Line::new(
                         "FFT Magnitude",
-                        egui_plot::PlotPoints::from_iter(
-                            spectrum.iter().map(|&(f, mag)| [f * 1e-6, mag]), // MHz
-                        ),
+                        spectrum
+                            .iter()
+                            .map(|&(f, mag)| [f * 1e-6, mag]) // MHz
+                            .collect::<egui_plot::PlotPoints<'_>>(),
                     )
                     .color(egui::Color32::LIGHT_GREEN)
                     .name("FFT |Magnitude| (MHz)");
